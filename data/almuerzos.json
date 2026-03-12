@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "nombre": "Carne Asada",
+    "descripcion": "Carnita asada con sus respectivos acompañamientos",
+    "categoria": "1"
+  },
+  {
+    "id": 2,
+    "nombre": "Cerdo hawaiano",
+    "descripcion": "",
+    "categoria": "13.000"
+  },
+  {
+    "id": 3,
+    "nombre": "Pechuga gratinada",
+    "descripcion": "",
+    "categoria": "15.000"
+  },
+  {
+    "id": 4,
+    "nombre": "Ajiaco con pollo",
+    "descripcion": "Comida",
+    "categoria": "ESPECIAL"
+  }
+]
