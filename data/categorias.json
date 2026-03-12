@@ -1,0 +1,27 @@
+[
+  {
+    "id": 1,
+    "nombre": "ESPECIAL",
+    "precio": 0
+  },
+  {
+    "id": 2,
+    "nombre": "POLLO",
+    "precio": 18000
+  },
+  {
+    "id": 3,
+    "nombre": "CARNE",
+    "precio": 20000
+  },
+  {
+    "id": 4,
+    "nombre": "PESCADO",
+    "precio": 22000
+  },
+  {
+    "id": 5,
+    "nombre": "OTRO",
+    "precio": 15000
+  }
+]
