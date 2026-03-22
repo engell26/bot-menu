@@ -1,122 +1,114 @@
-# Documento de Requerimientos - Bot Telegram Glotón D.C.
+# Bot Menú Glotón D.C.
 
-## 1. Descripción General
-
-
----
-
-## 2. Actores
-
-| Actor                   | Descripción                                             |
-|-------------------------|---------------------------------------------------------|
-| administrador           | actor principal en la creacion de los menú              |
-| hijos del administrador | de vez en cuando cuando el admin no pueda ello lo harán |
+Bot de Telegram para gestionar almuerzos de un restaurante.
 
 ---
 
-## 3. Comandos
+## Estructura del Proyecto
 
-- `/start` → inicia todo el flujo de la conversacion
-- `/cancel` → termina la conversación
-
----
-
-## 4. Flujos
-
-### 4.1 Registrar Almuerzo
-
- - **NOMBRE** → pide nombre del almuerzo
- - **DESCRIPCIÓN (opcional)** → una breve descripocion de la preparación o los ingredientes \\ si no necesita una descripción se deja en blanco
- - **CATEGORIA SUGERIDA** → categoria en la que por lo general esta ubicado este almuerzo
- - **REGISTRAR OTRO** → pregunta que si quiere registrar otro almuerzo y repite el pasó sino continua con lo siguiente
-
-### 4.2 Registrar Entrada
-
- - **NOMBRE** → pide nombre de la entrada
- - **REGISTRAR OTRO** → pregunta que si quiere registrar otra entrada y repite el pasó sino continua con lo siguiente
-
-### 4.3 Generar Menú
-
- #### Parte 1 - Especiales
-
-  - **CONFIRMACIÓN** → se confirma que vay a haber una seccion de especiales en el menú actual \\ en caso de que no haya continua directamente con la siguiente parte
-  - **SUGERENCIA** → segun el día se pueden sugerir varios especiales, estos son lo que se quedan fijos ciertos días
-  - **ELECCION DE ALMUERZOS** → se muestra una lista de almuerzos registrados y se eligen de acuerdo al id de cada uno
-    - **REGISTRAR ALMUERZO** → en caso de querer registrar otro almuerzo sin la necesidad de regresar al menú principal de nuevo
-
- #### Parte 2 - Entradas
-  - **ELECCION DE ENTRADAS** → se muestra una lista de entradas y se eligen de acuerdo al id de cada una 
-    - **REGISTRAR ENTRADA** → en caso de querer registrar otra entrada sin tener que regresar al menu principal
-  
- #### Parte 3 - Almuerzos
-  *se deciden 4 categorias de precios de almuerzos 1/2/3/4 y se crea un cliclo que recorre cada una de ellas*
-  ##### 3.1 - CATEGORIAS 1/2/3/4 
-   - **PRECIO** → si el precio determinado ya no le sirve aqui se cambia \\ en caso de que si le sirve se continua normal
-   - **ELECCION DE ALMUERZOS** → se muestra la lista de almuerzo que irian en esta categoria de precios
-    - **REGISTRAR ALMUERZO** → en caso de querer registrar otro almuerzo sin la necesidad de regresar al menú principal de nuevo
-
- #### Parte 4 - Acompañamientos
-
-  - **ELECCION DE ACOMPAÑAMIENTOS** → se eligen los acompañamientos, ya sea por sets de acompañamientos o por eleccion
-  *un set es una lista de acompañamientos predeterminados ej: "arroz, papa, maduro y ensalada" que el usuario puede definir*
-
- #### Parte 5 - vista previa del menú
-  - **PREVIW DEL MENÚ** → se le muestra una vista previa del menu como texto formateado con las variables ubicadas
-
-
----
-
-## 5. Reglas de Negocio
-
-| ID   | Regla                                                                                     |
-|------|-------------------------------------------------------------------------------------------|
-| RN01 | Solo un menu por dia.                                                                     |
-| RN02 | No se permiten almuerzos duplicados en el catalogo.                                       |
-| RN03 | Los especiales de fin de semana se sugieren automaticamente segun el dia.                 |
-| RN04 | El usuario puede corregir cualquier dato en el paso de revision antes de generar el Word. |
-| RN05 | Solo usuarios con ID de Telegram autorizado pueden usar el bot.                           |
-| RN06 | El documento final se entrega en .docx para permitir ediciones manuales.                  |
-
----
-
-## 6. Datos Fijos del Menú
-
-- Logo
-- seccion de info de domicilios
-- seccion de info de pagos por transferencias
-- info de precios por desechables
-
----
-
-## 7. Estructura del Proyecto
 ```
 bot-menu/
-bot/
-bot.py              # Logica del bot, comandos y flujo conversacional
-menu_logic/
-menu.py             # Generacion del documento Word
-almuerzos.py        # Gestion del catalogo de almuerzos (JSON)
-data/
-almuerzos.json      # Catalogo persistente de almuerzos
-entradas.json
-acompañamientos.json
-templates/            # Plantilla base del menu
-output/               # Menus generados (no se sube a GitHub)
-.env                  # Token y IDs autorizados (no se sube a GitHub)
-.gitignore
-requirements.txt
-README.md
-
+├── .env                  # Token del bot y variables de entorno
+├── .gitignore
+├── README.md
+├── requirements.txt
+├── bot.log               # Logs del bot
+├── bot/
+│   ├── bot.py            # Lógica principal del bot
+│   ├── menu_logic/
+│   │   ├── base.py       # Clase base con métodos CRUD
+│   │   ├── categorias.py # Gestor de categorías
+│   │   ├── almuerzos.py  # Gestor de almuerzos
+│   │   ├── entradas.py   # Gestor de entradas
+│   │   └── acompanamientos.py # Gestor de acompañamientos
+│   └── __pycache__/
+└── data/                 # Archivos JSON persistentes
+    ├── almuerzos.json
+    ├── entradas.json
+    ├── acompanamientos.json
+    └── categorias.json
 ```
 
 ---
 
-## 8. Tecnologías
+## Comandos
 
-| Tecnologia          | Uso                                    |
-|---------------------|----------------------------------------|
-| Python 3            | Lenguaje principal                     |
-| python-telegram-bot | Comunicacion con la API de Telegram    |
-| python-docx         | Generacion del documento Word          |
-| python-dotenv       | Gestion de variables de entorno        |
-| JSON                | Persistencia del catalogo de almuerzos |
+- `/start` - Inicia el bot y muestra el menú principal
+- `/salida` - Termina la sesión
+
+---
+
+## Funcionalidades
+
+### Menú Principal
+
+1. **Gestión** - Administrar el catálogo de productos
+2. **Generar Menú** - Crear el menú del día
+
+### Gestión de Catálogo
+
+| Opción | Descripción |
+|--------|-------------|
+| Almuerzos | CRUD completo (registrar, actualizar, eliminar, ver todos) |
+| Entradas | CRUD completo |
+| Acompañamientos | CRUD completo |
+| Categorías | Editar nombre y precio de las categorías |
+
+### Generar Menú (En desarrollo)
+
+- [x] Parte 1: Especiales del día
+- [ ] Parte 2: Entradas
+- [ ] Parte 3: Almuerzos por categoría
+- [ ] Parte 4: Acompañamientos
+- [ ] Parte 5: Vista previa
+
+---
+
+## Reglas de Negocio
+
+| ID   | Regla |
+|------|-------|
+| RN01 | Solo un menú por día |
+| RN02 | No se permiten almuerzos duplicados en el catálogo |
+| RN03 | Los IDs se reindexan al eliminar registros |
+
+---
+
+## Tecnologías
+
+| Tecnología | Uso |
+|------------|-----|
+| Python 3 | Lenguaje principal |
+| python-telegram-bot | Comunicación con API de Telegram |
+| python-dotenv | Gestión de variables de entorno |
+| JSON | Persistencia de datos |
+
+---
+
+## Instalación
+
+1. Crear entorno virtual:
+   ```bash
+   python -m venv venv
+   ```
+
+2. Activar entorno virtual:
+   ```bash
+   source venv/bin/activate  # Linux/Mac
+   venv\Scripts\activate     # Windows
+   ```
+
+3. Instalar dependencias:
+   ```bash   pip install -r requirements.txt
+   ```
+
+4. Configurar `.env`:
+   ```
+   TOKEN=tu_token_de_telegram
+   ```
+
+5. Ejecutar:
+   ```bash
+   cd bot
+   python bot.py
+   ```

@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "id": 1,
+    "nombre": "Pollo Frito",
+    "descripcion": "con papas",
+    "categoria": "POLLO"
+  },
+  {
+    "id": 2,
+    "nombre": "Carne cruda",
+    "descripcion": "Carne de cerdo cruda",
+    "categoria": "ESPECIAL"
+  },
+  {
+    "id": 3,
+    "nombre": "Carbe asada",
+    "descripcion": "",
+    "categoria": "ESPECIAL"
+  }
+]
