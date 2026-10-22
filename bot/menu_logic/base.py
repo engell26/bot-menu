@@ -4,6 +4,8 @@ Proporciona métodos CRUD genéricos que todas las clases hija heredan.
 """
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -25,20 +27,42 @@ class GestorBase:
         self.FILE = self.DATA_DIR / archivo
     
     def _load(self) -> List[Dict]:
-        """Carga datos desde el archivo JSON."""
+        """Carga datos desde el archivo JSON con manejo de errores."""
         if not self.FILE.exists() or self.FILE.stat().st_size == 0:
             return self.datos_default.copy()
-        
-        with open(self.FILE, "r", encoding="utf-8") as f:
-            content = f.read()
-            if not content.strip():
-                return self.datos_default.copy()
-            return json.loads(content)
+
+        try:
+            with open(self.FILE, "r", encoding="utf-8") as f:
+                content = f.read()
+                if not content.strip():
+                    return self.datos_default.copy()
+                return json.loads(content)
+        except json.JSONDecodeError:
+            # Archivo corrupto, retornar default
+            return self.datos_default.copy()
+        except IOError:
+            return self.datos_default.copy()
     
     def _save(self, datos: List[Dict]) -> None:
-        """Guarda datos en el archivo JSON."""
-        with open(self.FILE, "w", encoding="utf-8") as f:
-            json.dump(datos, f, indent=2, ensure_ascii=False)
+        """Guarda datos en el archivo JSON con escritura atómica."""
+        # Crear directorio si no existe
+        self.DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Escribir a archivo temporal primero (atomic write)
+        fd, temp_path = tempfile.mkstemp(
+            suffix='.tmp',
+            dir=str(self.DATA_DIR)
+        )
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(datos, f, indent=2, ensure_ascii=False)
+            # Renombrar atómicamente (en POSIX)
+            os.replace(temp_path, str(self.FILE))
+        except Exception:
+            # Limpiar archivo temporal si hay error
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise
     
     def get_all(self) -> List[Dict]:
         """Retorna todos los registros."""

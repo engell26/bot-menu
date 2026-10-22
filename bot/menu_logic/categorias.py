@@ -36,3 +36,15 @@ class GestorCategorias(GestorBase):
     def update_precio(self, id: int, precio: int) -> bool:
         """Actualiza el precio de una categoría."""
         return self.update(id, precio=precio) is not None
+
+    def delete(self, id: int) -> bool:
+        """Elimina una categoría SIN reindexar IDs para preservar integridad."""
+        datos = self._load()
+        inicial = len(datos)
+        datos = [d for d in datos if d.get("id") != id]
+
+        if len(datos) < inicial:
+            self._save(datos)
+            return True
+
+        return False

@@ -10,6 +10,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 import os
 import sys
+import re
+from typing import Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -17,11 +19,100 @@ from menu_logic.almuerzos import GestorAlmuerzos
 from menu_logic.entradas import GestorEntradas
 from menu_logic.categorias import GestorCategorias
 from menu_logic.acompanamientos import GestorAcompanamientos
+from menu_logic.menu_estado import GestorMenuEstado
+
+
+# === FUNCIONES DE VALIDACIÓN Y SANITIZACIÓN ===
+
+MAX_INPUT_LENGTH = 200  # Longitud máxima para nombres y descripciones
+MAX_ID_VALUE = 10000     # Valor máximo permitido para IDs
+
+
+def sanitizar_texto(texto: str) -> str:
+    """
+    Sanitiza texto de usuario para prevenir inyección de datos.
+    - Limita longitud
+    - Elimina caracteres de control peligrosos
+    - Normaliza espacios en blanco
+    """
+    if not texto:
+        return ""
+
+    # Limitar longitud
+    texto = texto[:MAX_INPUT_LENGTH]
+
+    # Eliminar caracteres de control (excepto salto de línea permitido en descripciones)
+    texto = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', texto)
+
+    # Normalizar espacios múltiples a uno solo
+    texto = re.sub(r'\s+', ' ', texto)
+
+    # Eliminar espacios al inicio y final
+    texto = texto.strip()
+
+    return texto
+
+
+def validar_callback_id(callback_data: str, prefijo: str) -> Optional[int]:
+    """
+    Extrae y valida un ID numérico de callback_data.
+    Retorna el ID si es válido, None si es inválido.
+
+    Ejemplo: validar_callback_id("del_almuerzos_5", "del_almuerzos_") -> 5
+    """
+    if not callback_data or not prefijo:
+        return None
+
+    try:
+        id_str = callback_data.replace(prefijo, "")
+        id_val = int(id_str)
+
+        # Validar que el ID esté en rango razonable
+        if id_val < 1 or id_val > MAX_ID_VALUE:
+            return None
+
+        return id_val
+    except (ValueError, AttributeError):
+        return None
+
+
+def parsear_callback_tipo_id(callback_data: str, prefijo: str) -> Optional[Tuple[str, int]]:
+    """
+    Parsea callback_data con formato prefijo_tipo_id.
+    Retorna (tipo, id) si es válido, None si es inválido.
+
+    Ejemplo: parsear_callback_tipo_id("del_almuerzos_5", "del_") -> ("almuerzos", 5)
+    """
+    if not callback_data or not prefijo:
+        return None
+
+    try:
+        partes = callback_data.split("_")
+        if len(partes) < 3:
+            return None
+
+        tipo = partes[1]
+        id_str = partes[2]
+        id_val = int(id_str)
+
+        # Validar tipo permitido
+        tipos_validos = {"almuerzos", "entradas", "acompanamientos"}
+        if tipo not in tipos_validos:
+            return None
+
+        # Validar ID en rango
+        if id_val < 1 or id_val > MAX_ID_VALUE:
+            return None
+
+        return (tipo, id_val)
+    except (ValueError, AttributeError):
+        return None
 
 almuerzos_db = GestorAlmuerzos()
 entradas_db = GestorEntradas()
 categorias_db = GestorCategorias()
 acompanamientos_db = GestorAcompanamientos()
+menu_estado_db = GestorMenuEstado()
 
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
@@ -172,10 +263,14 @@ async def cat_editar_precio(update, context):
 async def cat_seleccionar_nombre(update, context):
     query = update.callback_query
     await query.answer()
-    
-    cat_id = int(query.data.replace("catn_", ""))
+
+    cat_id = validar_callback_id(query.data, "catn_")
+    if cat_id is None:
+        await query.edit_message_text("❌ ID de categoría inválido.", reply_markup=gestion_keyboard())
+        return ConversationHandler.END
+
     context.user_data["cat_id"] = cat_id
-    
+
     await query.edit_message_text("Ingresa el nuevo nombre de la categoría:")
     return 20
 
@@ -183,18 +278,26 @@ async def cat_seleccionar_nombre(update, context):
 async def cat_seleccionar_precio(update, context):
     query = update.callback_query
     await query.answer()
-    
-    cat_id = int(query.data.replace("catp_", ""))
+
+    cat_id = validar_callback_id(query.data, "catp_")
+    if cat_id is None:
+        await query.edit_message_text("❌ ID de categoría inválido.", reply_markup=gestion_keyboard())
+        return ConversationHandler.END
+
     context.user_data["cat_id"] = cat_id
-    
+
     await query.edit_message_text("Ingresa el nuevo precio (solo números):")
     return 21
 
 
 async def cat_guardar_nombre(update, context):
     cat_id = context.user_data.get("cat_id")
-    nuevo_nombre = update.message.text
-    
+    nuevo_nombre = sanitizar_texto(update.message.text)
+
+    if not nuevo_nombre:
+        await update.message.reply_text("❌ El nombre no puede estar vacío.")
+        return 20
+
     categorias_db.update(cat_id, nombre=nuevo_nombre)
     await update.message.reply_text("✅ Nombre actualizado.", reply_markup=gestion_keyboard())
     return ConversationHandler.END
@@ -204,6 +307,9 @@ async def cat_guardar_precio(update, context):
     cat_id = context.user_data.get("cat_id")
     try:
         nuevo_precio = int(update.message.text)
+        if nuevo_precio < 0:
+            await update.message.reply_text("❌ El precio no puede ser negativo.")
+            return 21
         categorias_db.update(cat_id, precio=nuevo_precio)
         await update.message.reply_text("✅ Precio actualizado.", reply_markup=gestion_keyboard())
     except ValueError:
@@ -267,15 +373,40 @@ async def opc_registrar_start(update, context):
 
 
 async def opc_registrar_nombre(update, context):
-    context.user_data["reg_nombre"] = update.message.text
+    nombre_sanitizado = sanitizar_texto(update.message.text)
+
+    if not nombre_sanitizado:
+        await update.message.reply_text("❌ El nombre no puede estar vacío. Intenta de nuevo:")
+        return ESTADO_NOMBRE
+
+    # Verificar duplicados para todos los tipos
     tipo = context.user_data.get("gest_tipo")
-    
+    if tipo == "almuerzos":
+        existentes = almuerzos_db.get_all()
+    elif tipo == "entradas":
+        existentes = entradas_db.get_all()
+    elif tipo == "acompanamientos":
+        existentes = acompanamientos_db.get_all()
+    else:
+        existentes = []
+
+    for item in existentes:
+        if item.get("nombre", "").lower() == nombre_sanitizado.lower():
+            await update.message.reply_text(
+                f"❌ Ya existe un registro con el nombre '{nombre_sanitizado}'.",
+                reply_markup=opciones_crud_keyboard(f"gest_{tipo}")
+            )
+            return ConversationHandler.END
+
+    context.user_data["reg_nombre"] = nombre_sanitizado
+    tipo = context.user_data.get("gest_tipo")
+
     if tipo == "almuerzos":
         cats = categorias_db.get_all_nombres()
         keyboard = []
         for cat in cats:
             keyboard.append([InlineKeyboardButton(cat, callback_data=f"cat_{cat}")])
-        
+
         await update.message.reply_text(
             "Selecciona la categoría:",
             reply_markup=InlineKeyboardMarkup(keyboard)
@@ -289,19 +420,33 @@ async def seleccionar_categoria(update, context):
     """Maneja la selección de categoría por botón."""
     query = update.callback_query
     await query.answer()
-    
+
+    # Validar formato del callback
     categoria = query.data.replace("cat_", "")
-    context.user_data["reg_categoria"] = categoria
-    
+    # Sanitizar el nombre de categoría (debe coincidir con categorías existentes)
+    categoria_sanitizada = sanitizar_texto(categoria)
+
+    # Verificar que la categoría existe
+    categorias_validas = categorias_db.get_all_nombres()
+    if categoria_sanitizada not in categorias_validas:
+        await query.edit_message_text("❌ Categoría inválida.")
+        return ConversationHandler.END
+
+    context.user_data["reg_categoria"] = categoria_sanitizada
+
     await query.edit_message_text(
-        f"Categoría seleccionada: {categoria}\n\n"
+        f"Categoría seleccionada: {categoria_sanitizada}\n\n"
         "Ingresa la descripción (opcional) o /skip para omitir:"
     )
     return ESTADO_DESC
 
 
 async def opc_registrar_desc(update, context):
-    context.user_data["reg_descripcion"] = "" if update.message.text == "/skip" else update.message.text
+    if update.message.text != "/skip":
+        descripcion_sanitizada = sanitizar_texto(update.message.text)
+        context.user_data["reg_descripcion"] = descripcion_sanitizada
+    else:
+        context.user_data["reg_descripcion"] = ""
     return await guardar_registro(update, context)
 
 
@@ -310,18 +455,8 @@ async def guardar_registro(update, context):
     nombre = context.user_data.get("reg_nombre")
     categoria = context.user_data.get("reg_categoria", "")
     descripcion = context.user_data.get("reg_descripcion", "")
-    
-    if tipo == "almuerzos":
-        # Validar duplicados (RN02)
-        existentes = almuerzos_db.get_all()
-        for a in existentes:
-            if a.get("nombre", "").lower() == nombre.lower():
-                await update.message.reply_text(
-                    f"❌ Ya existe un almuerzo con el nombre '{nombre}'.",
-                    reply_markup=opciones_crud_keyboard(f"gest_{tipo}")
-                )
-                return ConversationHandler.END
 
+    if tipo == "almuerzos":
         nuevo = almuerzos_db.create(nombre=nombre, descripcion=descripcion, categoria=categoria)
         msg = f"✅ Almuerzo '{nuevo['nombre']}' registrado (ID: {nuevo['id']})"
     elif tipo == "entradas":
@@ -332,7 +467,7 @@ async def guardar_registro(update, context):
         msg = f"✅ Acompañamiento '{nuevo['nombre']}' registrado (ID: {nuevo['id']})"
     else:
         msg = "❌ Error: tipo no reconocido"
-    
+
     context.user_data.clear()
     context.user_data["gest_tipo"] = tipo
 
@@ -372,18 +507,21 @@ async def opc_eliminar_start(update, context):
 async def opc_eliminar_callback(update, context):
     query = update.callback_query
     await query.answer()
-    
-    partes = query.data.split("_")
-    tipo = partes[1]
-    reg_id = int(partes[2])
-    
+
+    resultado = parsear_callback_tipo_id(query.data, "del_")
+    if resultado is None:
+        await query.edit_message_text("❌ Datos inválidos.", reply_markup=gestion_keyboard())
+        return
+
+    tipo, reg_id = resultado
+
     if tipo == "almuerzos":
         almuerzos_db.delete(reg_id)
     elif tipo == "entradas":
         entradas_db.delete(reg_id)
     elif tipo == "acompanamientos":
         acompanamientos_db.delete(reg_id)
-    
+
     await query.edit_message_text("✅ Eliminado.", reply_markup=opciones_crud_keyboard(f"gest_{tipo}"))
 
 
@@ -419,24 +557,29 @@ async def opc_actualizar_start(update, context):
 async def opc_actualizar_seleccionar(update, context):
     query = update.callback_query
     await query.answer()
-    
-    partes = query.data.split("_")
-    tipo = partes[1]
-    reg_id = int(partes[2])
-    
+
+    resultado = parsear_callback_tipo_id(query.data, "edit_")
+    if resultado is None:
+        await query.edit_message_text("❌ Datos inválidos.", reply_markup=gestion_keyboard())
+        return ConversationHandler.END
+
+    tipo, reg_id = resultado
+
     context.user_data["update_tipo"] = tipo
     context.user_data["update_id"] = reg_id
-    
+
     await query.edit_message_text("Ingresa el nuevo nombre (o /skip para mantener):")
     return 10
 
 
 async def opc_actualizar_nombre(update, context):
     if update.message.text != "/skip":
-        context.user_data["update_nombre"] = update.message.text
-    
+        nombre_sanitizado = sanitizar_texto(update.message.text)
+        if nombre_sanitizado:
+            context.user_data["update_nombre"] = nombre_sanitizado
+
     tipo = context.user_data.get("update_tipo")
-    
+
     if tipo == "almuerzos":
         await update.message.reply_text("Ingresa la nueva categoría (o /skip para mantener):")
         return 11
@@ -446,16 +589,23 @@ async def opc_actualizar_nombre(update, context):
 
 async def opc_actualizar_cat(update, context):
     if update.message.text != "/skip":
-        context.user_data["update_categoria"] = update.message.text
-    
+        categoria_sanitizada = sanitizar_texto(update.message.text)
+        # Verificar que la categoría existe
+        categorias_validas = categorias_db.get_all_nombres()
+        if categoria_sanitizada not in categorias_validas:
+            await update.message.reply_text("❌ Categoría inválida. Intenta de nuevo o /skip:")
+            return 11
+        context.user_data["update_categoria"] = categoria_sanitizada
+
     await update.message.reply_text("Ingresa la nueva descripción (o /skip para mantener):")
     return 12
 
 
 async def opc_actualizar_desc(update, context):
     if update.message.text != "/skip":
-        context.user_data["update_descripcion"] = update.message.text
-    
+        descripcion_sanitizada = sanitizar_texto(update.message.text)
+        context.user_data["update_descripcion"] = descripcion_sanitizada
+
     return await guardar_actualizacion(update, context)
 
 
@@ -573,11 +723,15 @@ async def gen_volver_esp(update, context):
 async def gen_volver_entradas(update, context):
     query = update.callback_query
     await query.answer()
-    
+
     await query.edit_message_text(
-        "📝 Generar Menú\n\n¿Habrá especiales hoy?",
-        reply_markup=generar_keyboard_si_no("gen_esp"))
-    return ESTADO_GEN_ESPECIALES
+        "--- PARTE 2: ENTRADAS ---\n\n"
+        "Escribe los IDs separados por coma, o /skip para omitir.\n"
+        "Ejemplo: 1,3\n\n"
+        "Entradas disponibles:\n\n" +
+        "\n".join(f"{e['id']}. {e['nombre']}" for e in context.user_data.get("menu_entradas_disponibles", [])),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Volver", callback_data="menu_generar")]]))
+    return ESTADO_GEN_ENTRADAS
 
 
 async def guardar_especiales(update, context):
@@ -781,46 +935,66 @@ async def guardar_almuerzos_categoria(update, context):
 async def gen_volver_categoria(update, context):
     query = update.callback_query
     await query.answer()
-    
+
     idx = context.user_data["menu_idx_categoria"]
     if idx > 0:
         context.user_data["menu_idx_categoria"] = idx - 1
-    
-    return await mostrar_siguiente_categoria(update, context)
+
+    idx = context.user_data["menu_idx_categoria"]
+    categorias = context.user_data["menu_categorias"]
+
+    if idx >= len(categorias):
+        return await parte_acompanamientos(update, context)
+
+    cat = categorias[idx]
+
+    texto = f"--- PARTE 3: ALMUERZOS ({cat['nombre']}) ---\n\n"
+    precio = f"${cat['precio']:,}" if cat['precio'] > 0 else "Sin precio"
+    texto += f"Precio: {precio}\n\n"
+    texto += "Escribe los IDs separados por coma, o /skip para omitir.\n"
+    texto += "Ejemplo: 1,3,5\n\n"
+    texto += "Almuerzos disponibles:\n\n"
+    for a in cat["almuerzos"]:
+        texto += f"{a['id']}. {a['nombre']}"
+        if a.get('descripcion'):
+            texto += f" - {a['descripcion']}"
+        texto += "\n"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏭️ Omitir categoría", callback_data="gen_skip_cat")],
+        [InlineKeyboardButton("🔙 Volver", callback_data="gen_volver_cat")]
+    ])
+
+    await query.message.reply_text(texto, reply_markup=keyboard)
+    return ESTADO_GEN_ALMUERZOS
 
 
 async def parte_acompanamientos(update, context):
     acompanamientos = acompanamientos_db.get_all()
-    
+
     if not acompanamientos:
         context.user_data["menu"]["acompanamientos"] = []
         return await mostrar_vista_previa(update, context)
-    
+
     context.user_data["menu_acompanamientos_disponibles"] = acompanamientos
-    
+
     texto = "--- PARTE 4: ACOMPAÑAMIENTOS ---\n\n"
     texto += "Escribe los IDs separados por coma, o /skip para omitir.\n"
     texto += "Ejemplo: 1,3\n\n"
     texto += "Acompañamientos disponibles:\n\n"
     for a in acompanamientos:
         texto += f"{a['id']}. {a['nombre']}\n"
-    
+
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 Volver", callback_data="gen_volver_acomp")]
+        [InlineKeyboardButton("🔙 Volver", callback_data="menu_generar")]
     ])
-    
-    await update.message.reply_text(texto, reply_markup=keyboard)
+
+    if hasattr(update, 'callback_query') and update.callback_query:
+        await update.callback_query.message.reply_text(texto, reply_markup=keyboard)
+    else:
+        await update.message.reply_text(texto, reply_markup=keyboard)
     return ESTADO_GEN_ACOMPANAMIENTOS
 
-
-async def gen_volver_acomp(update, context):
-    query = update.callback_query
-    await query.answer()
-    
-    await query.edit_message_text(
-        "📝 Generar Menú\n\n¿Habrá especiales hoy?",
-        reply_markup=generar_keyboard_si_no("gen_esp"))
-    return ESTADO_GEN_ESPECIALES
 
 
 async def guardar_acompanamientos(update, context):
@@ -843,11 +1017,11 @@ async def guardar_acompanamientos(update, context):
 
 async def mostrar_vista_previa(update, context):
     menu = context.user_data["menu"]
-    
+
     texto = "=" * 40 + "\n"
     texto += "📋 VISTA PREVIA DEL MENÚ\n"
     texto += "=" * 40 + "\n\n"
-    
+
     if menu["especiales"]:
         texto += "🌟 ESPECIALES\n"
         texto += "-" * 20 + "\n"
@@ -857,14 +1031,14 @@ async def mostrar_vista_previa(update, context):
                 texto += f" - {e['descripcion']}"
             texto += "\n"
         texto += "\n"
-    
+
     if menu["entradas"]:
         texto += "🥗 ENTRADAS\n"
         texto += "-" * 20 + "\n"
         for e in menu["entradas"]:
             texto += f"• {e['nombre']}\n"
         texto += "\n"
-    
+
     if menu["almuerzos"]:
         texto += "🍽️ ALMUERZOS\n"
         texto += "-" * 20 + "\n"
@@ -883,24 +1057,21 @@ async def mostrar_vista_previa(update, context):
             else:
                 texto += "  (No hay almuerzos)\n"
         texto += "\n"
-    
+
     if menu["acompanamientos"]:
         texto += "🍚 ACOMPAÑAMIENTOS\n"
         texto += "-" * 20 + "\n"
         for a in menu["acompanamientos"]:
             texto += f"• {a['nombre']}\n"
-    
+
     texto += "\n" + "=" * 40 + "\n"
-    texto += "⚙️ El documento Word se generará pronto.\n"
+    texto += "✅ Menú generado exitosamente.\n"
     texto += "=" * 40 + "\n\n"
-    texto += "📝 Menú principal:"
-    
+    texto += "¿Qué deseas hacer?"
+
     await update.message.reply_text(texto, reply_markup=main_menu_keyboard())
-    
-    menu_data = context.user_data["menu"].copy()
+
     context.user_data.clear()
-    context.user_data["menu"] = menu_data
-    
     return ConversationHandler.END
 
 
@@ -960,13 +1131,11 @@ conv_generar = ConversationHandler(
         ],
         ESTADO_GEN_ALMUERZOS: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, guardar_almuerzos_categoria),
-            CallbackQueryHandler(mostrar_siguiente_categoria, pattern="mostrar_sig_cat"),
             CallbackQueryHandler(gen_volver_categoria, pattern="gen_volver_cat"),
             CallbackQueryHandler(gen_skip_categoria, pattern="gen_skip_cat")
         ],
         ESTADO_GEN_ACOMPANAMIENTOS: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, guardar_acompanamientos),
-            CallbackQueryHandler(gen_volver_acomp, pattern="gen_volver_acomp")
+            MessageHandler(filters.TEXT & ~filters.COMMAND, guardar_acompanamientos)
         ]
     },
     fallbacks=[
